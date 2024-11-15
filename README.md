@@ -1,78 +1,90 @@
-Étape 1 : Identifier les colonnes communes
-Déterminez les colonnes sur lesquelles effectuer la jointure et excluez explicitement defaut12m. Supposons que les colonnes de jointure soient id_contrat et periode.
+%macro freq_percent(table1, table2, vars);
 
-Étape 2 : Préparer les bases
-Ajoutez des préfixes aux colonnes des deux bases pour simplifier l'analyse des écarts après la jointure.
+    %let var_count = %sysfunc(countw(&vars)); /* Nombre de variables qualitatives */
+    
+    %do i = 1 %to &var_count;
+        %let var = %scan(&vars, &i); /* Extraire chaque variable */
+        
+        /* Pour la première table */
+        proc freq data=&table1 noprint;
+            tables &var / out=table1_freq_&var (keep=&var percent);
+        run;
 
-data A_prep;
-    set A(rename=(defaut12m=defaut12m_A));
-run;
+        /* Pour la deuxième table */
+        proc freq data=&table2 noprint;
+            tables &var / out=table2_freq_&var (keep=&var percent);
+        run;
 
-data B_prep;
-    set B(rename=(defaut12m=defaut12m_B));
-run;
-Étape 3 : Effectuer la jointure
-Effectuez une jointure sur les deux colonnes communes (id_contrat et periode) et incluez toutes les colonnes pour la comparaison.
+        /* Créer un tableau combiné des pourcentages */
+        proc sql;
+            create table freq_result_&var as
+            select 
+                coalesce(a.&var, b.&var) as &var,
+                a.percent as percent_table1,
+                b.percent as percent_table2
+            from table1_freq_&var as a
+            full join table2_freq_&var as b
+            on a.&var = b.&var;
+        quit;
 
-proc sql;
-    create table comparaison as
-    select 
-        coalesce(A_prep.id_contrat, B_prep.id_contrat) as id_contrat,
-        coalesce(A_prep.periode, B_prep.periode) as periode,
-        A_prep.*, 
-        B_prep.*
-    from A_prep
-    full join B_prep
-    on A_prep.id_contrat = B_prep.id_contrat
-       and A_prep.periode = B_prep.periode;
-quit;
-Étape 4 : Identifier les différences
-Créez un indicateur pour chaque colonne afin de vérifier si les valeurs sont égales entre les deux bases, sauf pour defaut12m.
+        /* Résultat : Table freq_result_&var contient les pourcentages pour cette variable */
+    %end;
 
-Générer une macro pour automatiser la comparaison des colonnes :
-
-%macro comparer_colonnes();
-    data comparaison_resultat;
-        set comparaison;
-        length ecart $500.;
-        ecart = '';
-
-        %let colonnes = variable1 variable2 variable3; /* Liste des colonnes sauf defaut12m */
-
-        %do i = 1 %to %sysfunc(countw(&colonnes.));
-            %let colonne = %scan(&colonnes., &i.);
-
-            if A_prep.&colonne. ne B_prep.&colonne. then
-                ecart = catx(', ', ecart, "&colonne.");
-        %end;
-
-        /* Indicateur global : s'il y a des différences */
-        if ecart = '' then ecart = 'Aucune différence';
-    run;
 %mend;
 
-%comparer_colonnes();
-Cette macro compare toutes les colonnes spécifiées (par exemple, variable1, variable2, etc.) et liste les différences dans une variable ecart.
+/* Exemple d'appel */
+%freq_percent(table1=A_prep, table2=B_prep, vars=var1 var2 var3);
 
-Étape 5 : Vérification globale
-Pour vérifier si des écarts existent globalement :
 
-proc freq data=comparaison_resultat;
-    tables ecart / nocum;
-run;
-Étape 6 : Exporter les résultats
-Vous pouvez exporter les résultats pour analyse plus approfondie.
+%macro compare_percent_periods(base_name, periods, vars);
 
-proc export data=comparaison_resultat
-    outfile="chemin/rapport_differences.xlsx"
-    dbms=xlsx
-    replace;
-run;
-Résultat attendu
-Une table indiquant pour chaque enregistrement si les valeurs sont identiques ou différentes, colonne par colonne.
-Une vue synthétique des écarts pour faciliter l'interprétation.
-Besoin d'aide pour adapter cette méthode à vos données spécifiques ?
+    %let var_count = %sysfunc(countw(&vars)); /* Nombre de variables qualitatives */
+    %let period_count = %sysfunc(countw(&periods)); /* Nombre de périodes */
 
+    %do i = 1 %to &var_count;
+        %let var = %scan(&vars, &i); /* Extraire chaque variable */
+
+        /* Créer une table vide pour accumuler les résultats */
+        data compare_result_&var;
+            length period $20. &var $50. percent 8.;
+        run;
+
+        %do j = 1 %to &period_count;
+            %let period = %scan(&periods, &j); /* Extraire chaque période */
+            
+            /* Générer le nom de la table */
+            %let table = &base_name._&period;
+
+            /* Effectuer le PROC FREQ pour la période actuelle */
+            proc freq data=&table noprint;
+                tables &var / out=freq_&var._&period (keep=&var percent);
+            run;
+
+            /* Ajouter la colonne période */
+            data freq_&var._&period;
+                set freq_&var._&period;
+                period = "&period";
+            run;
+
+            /* Ajouter les résultats à la table cumulative */
+            proc append base=compare_result_&var data=freq_&var._&period force;
+            run;
+        %end;
+
+        /* Transformer les résultats pour un tableau final : périodes = colonnes */
+        proc transpose data=compare_result_&var out=final_compare_&var(drop=_name_);
+            by &var;
+            id period;
+            var percent;
+        run;
+
+        /* Résultat : final_compare_&var contient le tableau comparatif pour cette variable */
+    %end;
+
+%mend;
+
+/* Exemple d'appel */
+%compare_percent_periods(base_name=A, periods=201001 201002 201003, vars=var1 var2 var3);
 
 
 
