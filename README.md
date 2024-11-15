@@ -1,30 +1,38 @@
-%macro compare_pairs(input_table, output_table);
-    data &output_table;
-        set &input_table;
-        array vars {*} _numeric_; /* Inclure toutes les colonnes numériques sauf NAME */
-        retain keep_flag 0; /* Indicateur pour garder les lignes */
-        length reason $500; /* Liste des colonnes avec des différences */
+%macro rename_with_prefix(data=, out=, prefix=);
+    proc sql;
+        select name
+        into :col_list separated by ' '
+        from dictionary.columns
+        where libname = 'WORK' and memname = upcase("&data.") and name not in ('ID', 'ID2');
+    quit;
 
-        /* Comparer les paires de lignes (1 vs 2, 3 vs 4, etc.) */
-        if mod(_n_, 2) = 1 then do;
-            keep_flag = 0; /* Réinitialiser l'indicateur de garde */
-            reason = '';   /* Réinitialiser la liste des différences */
-        end;
-        else do;
-            /* Comparer chaque colonne des deux lignes successives */
-            do i = 1 to dim(vars);
-                if vars[i] ne lag(vars[i]) then do;
-                    keep_flag = 1; /* Indiquer qu'il y a une différence */
-                    reason = catx(',', reason, vname(vars[i])); /* Ajouter la colonne avec différence */
-                end;
-            end;
-            if keep_flag = 1 then output; /* Garder la paire de lignes si des différences existent */
-        end;
-        drop i keep_flag; /* Supprimer les colonnes temporaires inutiles */
+    data &out.;
+        set &data.;
+        rename 
+            %do i = 1 %to %sysfunc(countw(&col_list.));
+                %let col = %scan(&col_list., &i);
+                &col = &prefix.&col
+            %end;
+        ;
     run;
-%mend compare_pairs;
+%mend;
 
+/* Ajouter le préfixe A_ et B_ */
+%rename_with_prefix(data=A, out=A_prefixed, prefix=A_);
+%rename_with_prefix(data=B, out=B_prefixed, prefix=B_);
 
+/* Faire la jointure */
+proc sql;
+    create table comparison as
+    select 
+        A.id,
+        A.id2,
+        A.*,
+        B.*
+    from A_prefixed as A
+    full join B_prefixed as B
+    on A.id = B.id and A.id2 = B.id2;
+quit;
 
 
 
