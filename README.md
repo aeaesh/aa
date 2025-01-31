@@ -1,33 +1,35 @@
-modifier_date <- function(date, unite, signe, valeur) {
-  # Vérification des entrées
-  if (!is.numeric(date) || !is.numeric(valeur) || !unite %in% c("mois", "annee") || !signe %in% c("+", "-")) {
-    stop("Les paramètres doivent être : date (numérique), unite ('mois' ou 'annee'), signe ('+' ou '-'), valeur (numérique)")
+
+ 
+ad.test.manuel <- function(x) {
+  # Taille de l'échantillon
+  n <- length(x)
+  
+  # Ordonner les données
+  x_sorted <- sort(x)
+  
+  # Calculer les quantiles théoriques de la distribution normale
+  mu <- mean(x)
+  sigma <- sd(x)
+  F <- pnorm(x_sorted, mean = mu, sd = sigma)  # Fonction de répartition de la normale
+  
+  # Calcul de la statistique A^2
+  sum_term <- 0
+  for (i in 1:n) {
+    sum_term <- sum_term + (2 * i - 1) * (log(F[i]) + log(1 - F[n - i + 1]))
   }
   
-  # Conversion de la date en format R Date
-  annee <- as.integer(date %/% 100)  # Extraction de l'année
-  mois <- as.integer(date %% 100)   # Extraction du mois
+  A2 <- -n - (1/n) * sum_term
   
-  if (mois < 1 || mois > 12) {
-    stop("Le mois dans la date doit être compris entre 1 et 12.")
-  }
+  # Valeur p approximative via la table de Anderson-Darling ou une simulation (complexe ici)
+  # Pour simplification, retournons A2 et une approximation de p-value (à affiner pour des tests rigoureux)
+  p_value <- 1 - pnorm(sqrt(A2))  # Approximation très basique
   
-  # Calcul de l'ajustement
-  ajustement <- if (signe == "+") valeur else -valeur
-  
-  if (unite == "mois") {
-    mois <- mois + ajustement
-    annee <- annee + (mois - 1) %/% 12
-    mois <- (mois - 1) %% 12 + 1
-  } else if (unite == "annee") {
-    annee <- annee + ajustement
-  }
-  
-  # Construction du nouveau format AAAAMM
-  nouvelle_date <- annee * 100 + mois
-  return(nouvelle_date)
+  # Retourner les résultats
+  return(list(statistic = A2, p_value = p_value))
 }
 
-# Exemple d'utilisation
-modifier_date(201401, "mois", "+", 3)  # Devrait donner 201404
-modifier_date(201405, "annee", "-", 1)  # Devrait donner 201305
+# Exemple d'utilisation :
+set.seed(123)
+data <- rnorm(50)  # Données normalement distribuées
+result <- ad.test.manuel(data)
+print(result)
